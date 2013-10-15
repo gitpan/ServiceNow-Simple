@@ -1,0 +1,16 @@
+Revision history for ServiceNow-Simple
+
+0.01    15-October-2013
+        First version, covering the basic features, with the following methods:
+          get
+	  get_keys
+	  get_records
+	  insert
+	  new
+	  print_results
+	  set_instance
+	  set_soap
+	  set_table
+	  soap_debug
+	  update
+        The main usage is described in the Synopsis, further documentation to follow 
