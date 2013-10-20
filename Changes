@@ -1,5 +1,10 @@
 Revision history for ServiceNow-Simple
 
+0.02    20-October-2013
+	* Fixed reported issues with questions in Makefile.PL affecting automated testing [rt.cpan.org #89550] CHORNY@cpan.org
+	* __limits in new() was being ignored
+	* Updated documenation
+
 0.01    15-October-2013
         First version, covering the basic features, with the following methods:
           get

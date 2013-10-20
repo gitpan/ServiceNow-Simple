@@ -2,7 +2,7 @@ package ServiceNow::Simple;
 use strict;
 use warnings FATAL => 'all';
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 #use 5.010;      # We want to use state
 use Data::Dumper;
@@ -357,6 +357,12 @@ sub _load_args
         push @args, SOAP::Data->name( $k => $v );
     }
 
+    # Add in the limits if not in the arguments and defined in object
+    if (! $args_h->{__limit} && $self->{__limit})
+    {
+        push @args, SOAP::Data->name( __limit => $self->{__limit} );
+    }
+
     return @args;
 }
 
@@ -415,6 +421,14 @@ sub _load_wsdl
             }
         }
     }
+}
+
+
+sub set_display_value
+{
+    my ($self, $flag) = @_;
+
+    $self->{__display_value} = $flag;
 }
 
 
@@ -492,7 +506,7 @@ This is true, whether you use this module or other web services to interact
 with ServiceNow.
 
 There is a ServiceNow demonstration instance you can play with if you are unsure.
-Try c<https://demo019.service-now.com/navpage.do> using user 'admin' with password
+Try C<https://demo019.service-now.com/navpage.do> using user 'admin' with password
 'admin'.  You will need to give the 'admin' user the 'soap' role and change the ACL
 for sys_user_group to allow read and write for the 'soap' role (see the Wiki
 C<http://wiki.servicenow.com/index.php?title=Main_Page> on how).  Tables that are open
@@ -577,8 +591,8 @@ do not need the ACL changes to allow access via these API's.
   ## Get Records
   ##############
   my $sn = ServiceNow::Simple->new({
-      instance => 'some_name',
-      table    => 'sys_user_group',
+      instance        => 'some_name',
+      table           => 'sys_user_group',
       __print_results => 1,
       });
   my $results = $sn->get_records({ name => 'Administration', __columns => 'name,description' });
@@ -643,31 +657,269 @@ carried out.  More documentation to follow.
 The set of methods that do things on ServiceNow and return useful information
 
 =head2 new
+
+new creates a new 'ServiceNow::Simple' object.  Parameters are passed in a hash reference.
+It requires that the B<instance> of ServiceNow and the initial B<table> be defined.
+The B<instance> is the I<some_name> in https://some_name.service-now.com.  The B<table> is
+the database name on the table to be operated on, for example the 'User' table is I<sys_user>.
+
+The parameters that can be passed are:
+
+=over 4
+
+=item instance
+
+REQUIRED. The ServiceNow instance that ServiceNow::Simple should connect to.
+
+=item table
+
+REQUIRED. The table that ServiceNow::Simple will operate on unless changed with I<table()> method
+
+=item user
+
+The I<user> that ServiceNow::Simple will connect to the instance as.  Note that this user
+will need to have one or more of the 'soap' roles.  B<Note:> if the configuration has been
+run and the user and password defined, this argument is not required.  It can be used to over-ride
+the configuration value.  See the 'simple.cfg' file located in the same location as the Simple.pm
+file.  Note that the date in Simple.cfg is obfuscated (at least for user and password)
+
+=item password
+
+The password for the I<user>, see user above.
+
+=item __limit
+
+Set the limit on the number of records that will be returned.  By default this is 250 records.
+Settting this in the I<new> method will apply this limit to all further calls unless that call
+defines it's own __limit.
+
+= item __display_value
+
+If set to true is will alter the way reference field information is returned.  By default or if
+false a reference field will return the sys_id of the record.  If set to true, the value returned
+is the display value (what you would see if looking at the form).  This can also be set using the
+I<set_display_value()> method.
+
+=item __print_results
+
+If true, results return will also be printed to STDOUT using Date::Dumper's Dump method.
+See the I<print_results()> method.
+
+=item __log
+
+Used to define the log object.  This can be a File::Log object or another log object that implements
+the I<msg(level, message)> and I<exp(message)> methods.
+
+=item __soap_debug
+
+If true, with activate soap debug messages.  See also the I<soap_debug()> method.
+
+=back
+
 =head2 get
+
+Query a single record from the targeted table by sys_id and return the record and its fields.
+So the expected argument (hash reference) would be { sys_id => <the_sys_id> } and could also
+include:
+
+=over 4
+
+=item __exclude_columns
+
+Specify a list of comma delimited field names to exclude from the result set
+
+=item __columns
+
+The opposite (and more useful IMHO) of __exclude_columns, define that field name you want returned.
+Often this is a much smaller list.
+
+=item __use_view
+
+Specify a Form view by name, to be used for limiting and expanding the results returned.
+When the form view contains deep referenced fields eg. caller_id.email, this field will be returned in the result as well
+
+=back
+
+The get() returns a hash reference where the keys are the field names.
+
+Example (that should run against the ServiceNow demo instance):
+
+ use ServiceNow::Simple;
+ use Data::Dumper;
+
+ my $sn = ServiceNow::Simple->new({
+     instance => 'demo019',
+     user     => 'admin',
+     password => 'admin',
+     table    => 'sys_user_group',
+     });
+
+ # THIS IS ONLY CALLED TO GET THE SYS_ID FOR THE GET CALL
+ my $results = $sn->get_keys({ name => 'CAB Approval' });
+
+ my $r = $sn->get({ sys_id => $results->{sys_id} });
+ print Dumper($r), "\n";
+
+ # Output from Dumper
+ $VAR1 = {
+   'active' => '1',
+   'cost_center' => '',
+   'default_assignee' => '',
+   'description' => 'CAB approvers',
+   'email' => '',
+   'exclude_manager' => '0',
+   'include_members' => '0',
+   'manager' => '',
+   'name' => 'CAB Approval',
+   'parent' => '',
+   'roles' => '',
+   'source' => '',
+   'sys_created_by' => 'admin',
+   'sys_created_on' => '2011-09-30 16:30:34',
+   'sys_id' => 'b85d44954a3623120004689b2d5dd60a',
+   'sys_mod_count' => '0',
+   'sys_updated_by' => 'admin',
+   'sys_updated_on' => '2011-09-30 16:30:34',
+   'type' => ''
+ };
+
 =head2 get_keys
+
+Query the targeted table by example values and return a comma delimited list of sys_id.
+Example values are key/value pairs where the key is the field name and the value is the
+value you want to match.  You can also use an __encoded_query.  See OTHER FIELD ARGUMENTS
+below.
+
+  $results = $sn->get_keys({ active => true, site_name => 'knoxfield', __limit => 6, });
+  # Multi record match:
+  # $results = {
+  #   'count' => '6',
+  #   'sys_id' => '23105e1f1903ac00fb54sdb1ad54dc1a,2310421b1cae0100e6ss837b1e7aa7d0,23100ed71cae0100e6ss837b1e7aa797,23100ed71cae0100e6ss837b1e7aa79d,2310421b1cae0100e6ss837b1e7aa7d4,231079c1b84ac5009c86fe3becceed2b'
+  # };
+
+
 =head2 get_records
+
+Query the targeted table by example values and return all matching records and their fields.
+See OTHER FIELD ARGUMENTS.
+
+   my $results = $sn->get_records({
+       active    => true,
+       site_name => 'knoxfield',
+       __limit   => 2,
+       __columns => 'name,description'
+       });
+   # Sample result set:
+   # $data_hr = {
+   #   'count' => 2,
+   #   'rows' => [
+   #     {
+   #       'description' => 'Knoxfield Main Site',
+   #       'name' => 'KNX Main Office'
+   #     },
+   #     {
+   #       'description' => 'Knoxfield Warehouse',
+   #       'name' => 'KNX Warehouse'
+   #     },
+   #   ]
+   # };
+
+
 =head2 insert
+
+Creates a new record for the table.  B<Note:> You need to provide all fields configured
+as mandatory (these are reflected in the WSDL as fileds with the attribute minOccurs=1).
+Example:
+
+  $sn->set_table('sys_user');
+  my $result = $sn->insert({
+      user_name => 'GNG',
+      name      => 'GNG Test Record',
+      active    => 'true',
+  });
+  print Dumper($result), "\n";
+  # Sample success result:
+  # $VAR1 = {
+  #   'name' => 'GNG Test Record',
+  #   'sys_id' => '2310f10bb8d4197740ff0d351492f271'
+  # };
+
 =head2 update
+
+Updates an existing record in the targeted table, identified by the mandatory sys_id field.
+Example:
+
+  my $r = $sn->update({
+      sys_id => '97415d1f1903ac00fb54adb1ad54dc1a',    ## REQUIRED, sys_id must be provided
+      active => 'true',                                #  Other field(s)
+      });
+
+  $r will be the sys_id, unless there is a fault, in which case it is undef and $self->{__fault}
+  will be set as follows:
+
+  $self->{__fault}{faultcode}
+  $self->{__fault}{faultstring}
+  $self->{__fault}{detail}
 
 =head1 RELATED METHODS
 
 Allow you to change tables, instances, debug messages, printing etc
 
 =head2 print_results
+
+If called without an argument, returns the current value.  Called with
+a true value sets printing of results using Data::Dumper's Dump method.
+Will also log to the log file if __log object is defined.
+
 =head2 set_instance
-=head2 set_soap
+
+Allows the instance to be changed from what was defined in the call to new.
+
 =head2 set_table
+
+Define the table the next method will work with/on.  Example:
+
+ $sn->set_table('sys_user');
+ # query something on User table
+ #...
+ $sn->set_table('cmn_locations');
+ # Now query something on Locations table
+
 =head2 soap_debug
+
+Turn on or off soap debug messages.  Example:
+
+ $sn->soap_debug(1); # Turn on debugging
+ # do some stuff
+ $sn->soap_debug(0); # Turn off debugging
+ # do some more stuff
+
+
+=head2 set_display_value
+
+Affects what is returned for a reference field.  By default a reference field
+returns the sys_id of the field referenced.  Turning on set_display_value will
+change this to return the display value for that table.  Example:
+
+ $sn->set_display_value(1);  # Turn on 'display value'
+ $sn->set_display_value(0);  # Turn off 'display value', so sys_id is returned
 
 =head1 PRIVATE METHODS
 
 Internal, you should not use, methods.  They may change without notice.
 
+=head2 set_soap
+
 =head2 SOAP::Transport::HTTP::Client::get_basic_credentials
+
 =head2 _get_method
+
 =head2 _init
+
 =head2 _load_args
+
 =head2 _load_wsdl
+
 =head2 _print_fault
 
 =head1 USEFUL LINKS
@@ -675,6 +927,67 @@ Internal, you should not use, methods.  They may change without notice.
  http://wiki.servicenow.com/index.php?title=Direct_Web_Services
 
  http://wiki.servicenow.com/index.php?title=Direct_Web_Service_API_Functions
+
+ A demo instance: https://demo019.service-now.com/
+
+ Query building: http://wiki.servicenow.com/index.php?title=RSS_Feed_Generator
+
+=head1 OTHER FIELD ARGUMENTS
+
+=head2 __encoded_query
+
+Specify an encoded query string to be used in filtering the returned results.
+The encoded query string format is similar to the value that may be specified
+in a sysparm_query URL parameter.  Example:
+
+ __encoded_query => 'active=true^nameSTARTSWITHa'
+
+=head2 __order_by
+
+Determines what fields the results are ordered by (ascending order). Example:
+
+ __order_by => 'active'
+
+=head2 __order_by_desc
+
+Order by in descending order.
+
+=head2 __exclude_columns
+
+Specify a list of comma delimited field names to exclude from the results.
+This is, generally the opposite of what you want.  See __columns below.
+
+=head2 __columns
+
+Define the columns you want in the results as a comma delimited list.  Example:
+
+ __columns => 'active,name,sys_id'
+
+=head2 __limit
+
+Limit the number of records that are returned.  The default is 250.  This can
+be set in the constructor I<new()>.  Example:
+
+ __limit => 2000,  # Return up to 2000 records
+
+=head2 __first_row
+
+Instruct the results to be offset by this number of records, from the beginning of the set.
+When used with __last_row has the effect of querying for a window of results.
+The results are inclusive of the first row number.
+
+=head2 __last_row
+
+Instruct the results to be limited by this number of records, from the beginning of the set,
+or the __start_row value when specified. When used with __first_row has the effect
+of querying for a window of results. The results are less than the last row number,
+and does not include the last row.
+
+=head2 __use_view
+
+Specify a Form view by name, to be used for limiting and expanding the results returned.
+When the form view contains deep referenced fields eg. caller_id.email, this field will
+be returned in the result as well
 
 =head1 VERSION
 

@@ -37,12 +37,15 @@ WriteMakefile(
 
 makeTestConfig();
 
-print "
-Type 'make' (windows: 'nmake' or 'dmake') to build ServiceNow::Simple.
-Type 'make test' to test ServiceNow::Simple before installing.
-Type 'make install' to install ServiceNow::Simple.
+if (!$ENV{AUTOMATED_TESTING})
+{
+    print "
+    Type 'make' (windows: 'nmake' or 'dmake') to build ServiceNow::Simple.
+    Type 'make test' to test ServiceNow::Simple before installing.
+    Type 'make install' to install ServiceNow::Simple.
 
-";
+    ";
+}
 
 exit 0;
 
@@ -89,16 +92,13 @@ production ServiceNow instance.
 
 ";
 
-    print "The instance is the myinstance in http://myinstance.service-now.com/\nInstance name [$i]: ";
-    chomp($instance = <STDIN>);
-    if($instance eq '') { $instance = $i if ($i ne ''); }
+    $instance = prompt("The instance is the myinstance in http://myinstance.service-now.com/\nInstance name [$i]: ", $i);
+    if ($instance eq '') { $instance = $i if ($i ne ''); }
 
-    print "Username with the soap role [$u]: ";
-    chomp($user = <STDIN>);
+    $user = prompt("Username with the soap role [$u]: ", $u);
     if($user eq '') { $user = $u if ($u ne ''); }
 
-    print "Password [$p]: ";
-    chomp($password = <STDIN>);
+    $password = prompt("Password [$p]: ", $p);;
     if($password eq '') { $password = $p if ($p ne ''); }
 
     #print "Storing $SERVER / $USERNAME / $PASSWORD ..\n";
