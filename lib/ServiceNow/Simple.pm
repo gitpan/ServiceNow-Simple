@@ -2,7 +2,7 @@ package ServiceNow::Simple;
 use strict;
 use warnings FATAL => 'all';
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 #use 5.010;      # We want to use state
 use Data::Dumper;
@@ -448,10 +448,18 @@ sub _init
     }
     else
     {
-        my $s = pack('H*', $config{user});
-        my $x = substr($k, 0, length($s));
-        my $u = $s ^ $x;
-        $self->{persistant}{user} = $u;
+        if (defined $config{user})
+        {
+            my $s = pack('H*', $config{user});
+            my $x = substr($k, 0, length($s));
+            my $u = $s ^ $x;
+            $self->{persistant}{user} = $u;
+        }
+        else
+        {
+            print STDERR "No user defined, quitting\n";
+            exit(1);
+        }
     }
 
     if ($args->{password})
@@ -460,12 +468,24 @@ sub _init
     }
     else
     {
-        my $s = pack('H*', $config{password});
-        my $x = substr($k, 0, length($s));
-        my $u = $s ^ $x;
-        $self->{persistant}{password} = $u;
+        if (defined $config{password})
+        {
+            my $s = pack('H*', $config{password});
+            my $x = substr($k, 0, length($s));
+            my $u = $s ^ $x;
+            $self->{persistant}{password} = $u;
+        }
+        else
+        {
+            print STDERR "No password defined, quitting\n";
+            exit(2);
+        }
     }
     if ($args->{proxy})
+    {
+        $self->{persistant}{proxy} = $args->{proxy};
+    }
+    elsif (defined $config{proxy})
     {
         $self->{persistant}{proxy} = $config{proxy};
     }

@@ -53,7 +53,7 @@ exit 0;
 sub makeTestConfig
 {
     my ($instance, $user, $password);
-    my ($i, $u, $p) = ('', '', '');
+    my ($i, $u, $p) = ('demo019', 'admin', 'admin');
 
     if(-e './t/config.cache')
     {
@@ -66,8 +66,8 @@ sub makeTestConfig
     print "=== ServiceNow::Simple 'make test' configuration. ===
 
 The tests will work with the ServiceNow demo019 instance with user
-'admin' and password 'admin'.  You will first need to add the 'soap'
-role to the 'admin' user and ensure that read and write ACL for table
+'admin' and password 'admin'.  You MAY need to add the 'soap' role
+to the 'admin' user first and ensure that read and write ACL for table
 sys_user_group is set for users with the 'soap' role.  The tests use
 the group 'CAB Approval'.
 
@@ -92,17 +92,17 @@ production ServiceNow instance.
 
 ";
 
-    $instance = prompt("The instance is the myinstance in http://myinstance.service-now.com/\nInstance name [$i]: ", $i);
+    $instance = prompt("The instance is the myinstance in http://myinstance.service-now.com/\nInstance name", $i);
     if ($instance eq '') { $instance = $i if ($i ne ''); }
 
-    $user = prompt("Username with the soap role [$u]: ", $u);
+    $user = prompt("Username with the soap role", $u);
     if($user eq '') { $user = $u if ($u ne ''); }
 
-    $password = prompt("Password [$p]: ", $p);;
+    $password = prompt("Password", $p);;
     if($password eq '') { $password = $p if ($p ne ''); }
 
     #print "Storing $SERVER / $USERNAME / $PASSWORD ..\n";
-    open (FD, '>', './t/config.cache') || die "open failed: $!";
+    open (FD, '>', './t/config.cache') || die "open of './t/config.cache' failed: $!";
     print FD "package CCACHE;\n";
     print FD "\# enter your instance, soap role username and password below.\n\n";
     print FD qq{sub instance { '$instance' ; }\n};
