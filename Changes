@@ -1,6 +1,10 @@
 Revision history for ServiceNow-Simple
 
-0.02    21-October-2013
+0.04    29-October-2013
+        * Capture and handle connection errors in tests
+        * TODO - Change from using default SOAP serialisation to using details from the WSDL
+
+0.03    21-October-2013
         * Tweak to handling of config data
         * Tweak so automated testing does not fail
         * Set default instance=demo019, user=admin and password=admin for testing

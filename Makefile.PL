@@ -90,6 +90,9 @@ three times. You can configure it later by either re-running
 Fair warning: you probably don't want to run 'make test' against a
 production ServiceNow instance.
 
+You can try the ServiceNow demo instances, generally something in the
+range demo001 to demo026, if you don't have your own instance(s).
+
 ";
 
     $instance = prompt("The instance is the myinstance in http://myinstance.service-now.com/\nInstance name", $i);

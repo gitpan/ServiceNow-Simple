@@ -2,7 +2,7 @@ package ServiceNow::Simple;
 use strict;
 use warnings FATAL => 'all';
 
-our $VERSION = '0.03';
+our $VERSION = '0.04';
 
 #use 5.010;      # We want to use state
 use Data::Dumper;
@@ -1011,13 +1011,19 @@ be returned in the result as well
 
 =head1 VERSION
 
-Version 0.01
+Version 0.04
 
 =cut
 
 =head1 AUTHOR
 
 Greg George, C<< <gng at cpan.org> >>
+
+=head1 TODO
+
+Currently the default SOAP serialization is used rather than forcing types from the WSDL.
+This can be a problem for UTF8 (non ASCII) characters which will likely be encoded as
+'base64' rather than 'string'
 
 =head1 BUGS
 
