@@ -1,5 +1,9 @@
 Revision history for ServiceNow-Simple
 
+0.05    30-October-2013
+        * Set SOAP data elements type from WSDL rather than have SOAP guess
+        * POD updates
+        
 0.04    29-October-2013
         * Capture and handle connection errors in tests
         * TODO - Change from using default SOAP serialisation to using details from the WSDL

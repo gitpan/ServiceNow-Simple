@@ -2,6 +2,7 @@ Changes
 lib/ServiceNow/Simple.pm
 Makefile.PL
 Config.PL
+Config
 MANIFEST			This list of files
 README
 t/00-load.t
@@ -11,5 +12,6 @@ t/03-update.t
 t/manifest.t
 t/pod-coverage.t
 t/pod.t
+t/config.cache
 META.yml                                 Module YAML meta-data (added by MakeMaker)
 META.json                                Module JSON meta-data (added by MakeMaker)

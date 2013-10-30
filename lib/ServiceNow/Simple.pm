@@ -2,9 +2,8 @@ package ServiceNow::Simple;
 use strict;
 use warnings FATAL => 'all';
 
-our $VERSION = '0.04';
+our $VERSION = '0.05';
 
-#use 5.010;      # We want to use state
 use Data::Dumper;
 use FindBin;
 use HTTP::Cookies;
@@ -88,8 +87,11 @@ sub get_keys
     # Print faults to log file or stderr
     $self->_print_fault($result);
 
-# GG error checking here
-    my $data_hr = $result->body->{'getKeysResponse'};
+    my $data_hr;
+    if ($result && $result->body && $result->body->{'getKeysResponse'})
+    {
+        $data_hr = $result->body->{'getKeysResponse'};
+    }
 
     if ($self->print_results())
     {
@@ -343,6 +345,7 @@ sub _get_method
 {
     my ($self, $method) = @_;
 
+    $self->{method}  = $method;
     $self->{__fault} = undef;  # Clear any previous faults
     return SOAP::Data->name($method)->attr({xmlns => 'http://www.service-now.com/'});
 }
@@ -352,9 +355,19 @@ sub _load_args
 {
     my ($self, $args_h) = @_;
     my (@args, $k, $v);
+
+    my $fld_details = $self->{wsdl}{$self->{instance}}{$self->{table}}{$self->{method}};
     while (($k, $v) = each %$args_h)
     {
-        push @args, SOAP::Data->name( $k => $v );
+        if ($fld_details->{$k})
+        {
+            (my $type = $fld_details->{$k}{type}) =~ s/xsd://gms;
+            push @args, SOAP::Data->name( $k => $v )->type($type);
+        }
+        else
+        {
+            push @args, SOAP::Data->name( $k => $v );
+        }
     }
 
     # Add in the limits if not in the arguments and defined in object
@@ -666,10 +679,37 @@ do not need the ACL changes to allow access via these API's.
   ... do something
   $sn->soap_debug(0);  # Turn off
 
+=head1 KEY FEATURES
+
+=over 4
+
+=item *
+
+Caching of user, password and proxy - one place to change and user and password
+is not scattered through many scripts
+
+=item *
+
+Results in simple I<perlish> style.  Ensures consistancy of returned types, AVOIDS
+an array of hashes for many items and a hash for one item, thereby keeping your
+code simpler
+
+=item *
+
+Arguments are I<'typed'> as per the WSDL.  This avoids UTF-8/16 data being encoded
+as base64 when it should be a string.
+
+=item *
+
+Allows returning of only those fields you require by defining them, rather than
+defining all the fields you don't want!  See __columns below.  This can save a
+lot of bandwidth when getting records.
+
+=back
 
 =head1 STATUS
 
-This is the initial release and is subject to change while more extensive testing is
+This is the early release and is subject to change while more extensive testing is
 carried out.  More documentation to follow.
 
 =head1 MAIN METHODS
@@ -701,7 +741,7 @@ The I<user> that ServiceNow::Simple will connect to the instance as.  Note that 
 will need to have one or more of the 'soap' roles.  B<Note:> if the configuration has been
 run and the user and password defined, this argument is not required.  It can be used to over-ride
 the configuration value.  See the 'simple.cfg' file located in the same location as the Simple.pm
-file.  Note that the date in Simple.cfg is obfuscated (at least for user and password)
+file.  Note that the data in Simple.cfg is obfuscated (at least for user and password)
 
 =item password
 
@@ -1009,9 +1049,22 @@ Specify a Form view by name, to be used for limiting and expanding the results r
 When the form view contains deep referenced fields eg. caller_id.email, this field will
 be returned in the result as well
 
+=head1 FILES
+
+=head2 config.cache
+
+Used to provide user, password and proxy settings for tests in /t
+
+=head2 Simple.cfg
+
+A configuration file that can contain the default user, password and proxy to use for all calls
+to method new() unless the 'user', 'password' and 'proxy' arguments are provided.  The user and
+password are obfuscated.  This is a very useful feature, only one place to change the user and
+password and they are not visible in a whole bunch of scripts.
+
 =head1 VERSION
 
-Version 0.04
+Version 0.05
 
 =cut
 
@@ -1113,4 +1166,5 @@ EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 =cut
 
 # End of ServiceNow::Simple
+
 #---< End of File >---#

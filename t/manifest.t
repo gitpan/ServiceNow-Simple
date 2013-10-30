@@ -8,7 +8,7 @@ use Test::More;
 #    plan( skip_all => "Author tests not required for installation" );
 #}
 
-my $min_tcm = 0.09;
+my $min_tcm = 1.26;
 eval "use Test::CheckManifest $min_tcm";
 plan skip_all => "Test::CheckManifest $min_tcm required" if $@;
 
