@@ -2,7 +2,7 @@ package ServiceNow::Simple;
 use strict;
 use warnings FATAL => 'all';
 
-our $VERSION = '0.05';
+our $VERSION = '0.06';
 
 use Data::Dumper;
 use FindBin;
@@ -11,6 +11,7 @@ use HTTP::Request::Common;
 use LWP::UserAgent;
 use SOAP::Lite;
 use XML::Simple;
+use Carp;
 
 $Data::Dumper::Indent=1;
 $Data::Dumper::Sortkeys=1;
@@ -76,6 +77,7 @@ sub get
     return;
 }
 
+
 sub get_keys
 {
     my ($self, $args_h) = @_;
@@ -139,9 +141,10 @@ sub get_records
     # __exclude_columns defined, it will over-ride this (and hence speed up the
     # process).  So __exclude_columns => undef is just a speed up, even though
     # there may be a LOT more data returned.
+    my $the_columns;
     if ($args_h->{__columns} && ! exists($args_h->{__exclude_columns}))
     {
-        my $the_columns = $args_h->{__columns};
+        $the_columns = $args_h->{__columns};
         delete $args_h->{__columns};
 
         if ($self->{__columns}{$self->{instance}}{$self->{table}}{$the_columns})
@@ -203,36 +206,133 @@ sub get_records
         }
     }
 
+    #__max_records   => 1000,
+    #__chunks        => 200,
+    #__callback      => 'write_csv',
+
+    # If this is a __callback call we need to set __first_row, __last_row and iterate over the
+    # possible result set.  Assume chunk size of 250 (default) unless __chunks is set.  Limit
+    # the max number of records if __max_records is set.  Assume __first_row is 0 unless set.
+    # Ignore __last_row and base on __chunks||250
+
+    if ($args_h->{__callback})
+    {
+        # Store the callback function and remove it from the arguments hash
+        my $callback = $args_h->{__callback};
+        delete $args_h->{__callback};
+
+        # Get the chunk size and clean up the arguments hash
+        my $chunk_size = 250;
+        if ($args_h->{__chunks})
+        {
+            $chunk_size = $args_h->{__chunks};
+            delete $args_h->{__chunks};
+        }
+
+        my $max_records;
+        if ($args_h->{__max_records})
+        {
+            $max_records = $args_h->{__max_records};
+            delete $args_h->{__max_records};
+
+            # max records takes precedence over chunk size
+            if ($chunk_size > $max_records)
+            {
+                $chunk_size = $max_records;
+            }
+        }
+
+        $args_h->{__first_row} = 0 unless $args_h->{__first_row};
+        $args_h->{__last_row}  = $chunk_size;
+
+        # Remove other things not relavent or useful :)
+        delete $args_h->{__limits} if $args_h->{__limits};
+
+        # If __columns, create an array of column names to pass
+        my @columns;
+        if ($the_columns)
+        {
+            @columns = split /,/, $the_columns;
+        }
+
+        # Make the first chunked call to ServiceNow
+        my $total_records = 0;
+        my @params = $self->_load_args($args_h);
+        my $result = $self->{soap}->call($method => @params);
+
+        # And now to the callback function
+        my ($data_hr, $count) = $self->_getRecordsResponse($result);
+        $total_records += $count;
+        { $callback->($data_hr, 1, \@columns); }
+
+
+        # Now chunk away...
+        while ($count == $chunk_size && (!defined($max_records) || $total_records < $max_records))
+        {
+            # Sleep if we need to
+            sleep($self->{__callback_sleep}) if $self->{__callback_sleep};
+
+            # We need to get more
+            $args_h->{__first_row} += $chunk_size;
+            if (defined $max_records)
+            {
+                $args_h->{__last_row} = (($args_h->{__first_row} + $chunk_size) < $max_records) ? $args_h->{__first_row} + $chunk_size : $max_records;
+            }
+            else
+            {
+                $args_h->{__last_row} = $args_h->{__first_row} + $chunk_size;
+            }
+
+            @params = $self->_load_args($args_h);
+            $result = $self->{soap}->call($method => @params);
+            ($data_hr, $count) = $self->_getRecordsResponse($result);
+            $total_records += $count;
+            { $callback->($data_hr, 0, \@columns); }
+        }
+        return { count => $total_records, rows => undef };  # data handled by the callback function
+    }
+    else
+    {
     my @params = $self->_load_args($args_h);
     my $result = $self->{soap}->call($method => @params);
+        my ($data_hr, $count) = $self->_getRecordsResponse($result);
 
-    # Print faults to log file or stderr
-    $self->_print_fault($result);
+        return $data_hr;
+    }
+}
 
 
+sub _getRecordsResponse
+{
+    my ($self, $result) = @_;
+
+    my $count = 0;
     my $data_hr;
-    my $have_data = 0;
     if ($result && $result->body && $result->body->{getRecordsResponse} && $result->body->{getRecordsResponse}{getRecordsResult})
     {
         my $data = $result->body->{getRecordsResponse}{getRecordsResult};
-        $have_data = 1;
         if (ref($data) eq 'HASH')
         {
             # There was only one record.  For consistant return, convert to array of hash
             $data_hr = { count => 1, rows => [ $data ] };
+            $count = 1;
         }
         else
         {
-            $data_hr = { count => scalar(@$data), rows => $data };
+            $count = scalar(@$data);
+            $data_hr = { count => $count, rows => $data };
         }
     }
 
-    if ($self->print_results() && $have_data)
+    # Print faults to log file or stderr
+    $self->_print_fault($result);
+
+    if ($self->print_results() && $data_hr)
     {
         print Data::Dumper->Dump([$data_hr], ['data_hr']) . "\n";
     }
 
-    return $data_hr;
+    return ($data_hr, $count);
 }
 
 
@@ -321,14 +421,18 @@ sub set_instance
 
 sub set_soap
 {
-    my ($self, $flag) = @_;
+    my $self = shift;
 
     my $url = 'https://' . $self->{instance} . '.service-now.com/' . $self->{table} . '.do?SOAP';
 
-    # Do we need to show the display value for a reference field rather than the sys_id
-    if ($flag || $self->{__display_value})
+    # Do we need to show the display value for a reference field rather than the sys_id, or both
+    if ($self->{__display_value} && !$self->{__plus_display_value})
     {
         $url .=  '&displayvalue=true';
+    }
+    elsif ($self->{__plus_display_value})
+    {
+        $url .=  '&displayvalue=all';
     }
 
     my %args = ( cookie_jar => HTTP::Cookies->new(ignore_discard => 1) ) ;
@@ -415,6 +519,10 @@ sub _load_wsdl
 
     my $ua = LWP::UserAgent->new();
     $ua->credentials($self->{instance} . '.service-now.com:443', 'Service-now', $user, $pword);
+
+    # Note:  There is no advantage in including the displayvalue=1 or displayvalue=all in the WSDL request
+    #        in the case of displayvalue=all, the dv_ fields can not be excluded for fields you do request
+    #        (or more accurately, fields you don't exclude)
     my $response = $ua->get('https://' . $self->{instance} . '.service-now.com/' . $table . '.do?WSDL');
     if ($response->is_success())
     {
@@ -442,6 +550,17 @@ sub set_display_value
     my ($self, $flag) = @_;
 
     $self->{__display_value} = $flag;
+    $self->set_soap();
+}
+
+
+sub set_plus_display_value
+{
+    my ($self, $flag) = @_;
+
+    $self->{__plus_display_value} = $flag;
+    $self->set_soap();
+    $self->_load_wsdl($self->{table});
 }
 
 
@@ -507,6 +626,7 @@ sub _init
 
     # Handle the other passed arguments
     $self->{__display_value} = $args->{__display_value} ? 1 : 0;
+    $self->{__plus_display_value} = $args->{__plus_display_value} ? 1 : 0;
     $self->set_instance($args->{instance})              if $args->{instance};
     $self->set_table($args->{table})                    if $args->{table};     # Important this is after instance
     $self->{__limit}         = $args->{__limit}         if $args->{__limit};
@@ -559,6 +679,7 @@ do not need the ACL changes to allow access via these API's.
       instance        => 'some_name',
       table           => 'sys_user',
       __display_value => 1,            # Return the display value for a reference field
+      __plus_display_value => 1,            # Return the display value for a reference field AND the sys_id
       __limit         => 23,           # Maximum records to return
       __log           => $log,         # Log to a File::Log object
       __print_results => 1,            # Print
@@ -705,12 +826,11 @@ Allows returning of only those fields you require by defining them, rather than
 defining all the fields you don't want!  See __columns below.  This can save a
 lot of bandwidth when getting records.
 
+=item *
+
+Persistant HTTP session across all SOAP calls
+
 =back
-
-=head1 STATUS
-
-This is the early release and is subject to change while more extensive testing is
-carried out.  More documentation to follow.
 
 =head1 MAIN METHODS
 
@@ -759,6 +879,18 @@ If set to true is will alter the way reference field information is returned.  B
 false a reference field will return the sys_id of the record.  If set to true, the value returned
 is the display value (what you would see if looking at the form).  This can also be set using the
 I<set_display_value()> method.
+
+= item __plus_display_value
+
+Similar to __display_value above but the display value and the sys_id are given.  The display value
+field is prefixed by B<dv_>, so for example the department field on the User table [sys_user]
+would appear twice, once as I<dv_department> giving the name and once as I<department> giving the sys_id.
+This can also be set using the I<set_plus_display_value()> method.
+
+B<Note:> Using __plus_display_value results in additional data being returned from the server, the dv_
+record is always returned for fields not excluded and they themselfs can not be excluded (for a field
+you do want).  If you have excluded (or not asked for with __columns) then the field and dv_field are
+excluded.
 
 =item __print_results
 
@@ -884,6 +1016,108 @@ See OTHER FIELD ARGUMENTS.
    #   ]
    # };
 
+=head3 get_records CHUNKED
+
+Should you require to extract a large amount of data you can employ a callback function
+to handle the response records and define a suitable chunk size (depending on your system/network/...).
+If you define a callback function, you can define your chunk size using __chunks (default is 250)
+and the maximum record count to return (using __max_records).  You can also define a sleep period
+in seconds between each chunk, should you wish to limit your impact on the system.
+
+Example:
+
+ __max_records    => 10000,            # Return at maximum 10000 records
+ __chunks         => 300,              # Get 300 records at a time
+ __callback       => \&write_csv,      # Call your function write_csv
+ __callback_sleep => 1,                # Sleep for a second between chunks
+
+The callback function will be passed the following arguments:
+
+=over 4
+
+=item $results
+
+The data set hash (as per a normal return value from get_records(), which may be undef for no more records.
+
+=item $first_call
+
+Flag, if true, indicates the first callback for the data set.
+
+=item $headers
+
+The field headers expected in $results->{rows}, as an array ref (ie based on what we have in __columns or all columns).
+Note that if __plus_display_value is true, you will also get a dv_<fieldname> for each return field.
+This array can be used to select the data, print a header, act as keys to set headers from a hash, ....
+
+=back
+
+=head3 get_records chunked EXAMPLE
+
+ # get_records CHUNKED
+ #
+ #
+ use warnings;
+ use strict;
+ use ServiceNow::Simple;
+ use Text::CSV;
+ use feature 'state';
+ use Data::Dumper;
+
+ my $sn = ServiceNow::Simple->new({
+     instance              => 'demo012',
+     user                  => 'admin',
+     password              => 'admin',
+     table                 => 'sys_user',
+     __encoded_query       => 'user_nameSTARTSWITHa',
+     });
+ $sn->set_plus_display_value(1);
+ my $results = $sn->get_records({
+     __columns            => 'name,user_name,dv_department,department',
+     __max_records        => 92,
+     __chunks             => 10,
+     __callback           => \&write_csv,
+     });
+
+ print Dumper($results), "\n";
+
+ sub write_csv
+ {
+     my (
+         $results,       # The data set hash, which may be undef for no more records
+         $first_call,    # Flag to indicate first callback for data set, if true
+         $headers        # The field headers expected in $results->{rows}, as an array ref (ie based on what we have in __columns or all columns)
+         ) = @_;
+
+     # Text::CSV object
+     state $csv;
+     state $fh;
+     state $total_rows = 0;
+
+     # Do initialisation if first_call
+     if ($first_call)
+     {
+         $csv = Text::CSV->new({ binary => 1, eol => "\015\012" }) or die "Cannot use CSV: ".Text::CSV->error_diag ();
+         open($fh, ">:encoding(utf8)", "new.csv") or die "new.csv: $!";
+         $csv->print($fh, $headers);
+     }
+
+     # Print the row from results in the order of headers
+     if ($results && $results->{count})
+     {
+         foreach my $row (@{ $results->{rows} })
+         {
+             my @data = @{$row}{@$headers};  # Hash slice
+             $csv->print($fh, \@data);
+             $total_rows++;
+         }
+     }
+     else
+     {
+         close $fh or die "new.csv: $!";
+         print "Wrote $total_rows rows to new.csv\n";
+     }
+ }
+
 
 =head2 insert
 
@@ -964,6 +1198,17 @@ change this to return the display value for that table.  Example:
  $sn->set_display_value(1);  # Turn on 'display value'
  $sn->set_display_value(0);  # Turn off 'display value', so sys_id is returned
 
+=head2 set_plus_display_value
+
+Affects what is returned for a reference field.  By default a reference field
+returns the sys_id of the field referenced.  Turning on set_plus_display_value will
+return two fields for reference field(s), one prefixed with I<dv_> which has the
+display value for that table and the original reference field(s) which will contain
+the sys_id.  Example:
+
+ $sn->set_plus_display_value(1);  # Turn on 'display value & reference value'
+ $sn->set_plus_display_value(0);  # Turn off 'display value & reference value', so sys_id is returned
+
 =head1 PRIVATE METHODS
 
 Internal, you should not use, methods.  They may change without notice.
@@ -1026,7 +1271,8 @@ Define the columns you want in the results as a comma delimited list.  Example:
 =head2 __limit
 
 Limit the number of records that are returned.  The default is 250.  This can
-be set in the constructor I<new()>.  Example:
+be set in the constructor I<new()> in which case it is applied for all relavent
+calls or use it in the method calls get_keys or get_records.  Example:
 
  __limit => 2000,  # Return up to 2000 records
 
@@ -1036,12 +1282,15 @@ Instruct the results to be offset by this number of records, from the beginning 
 When used with __last_row has the effect of querying for a window of results.
 The results are inclusive of the first row number.
 
+Note, do not use __limit with __first_row/__last_row otherwise the system will generate a
+result set based on __limit rather than what is required for __first_row/__last_row.
+
 =head2 __last_row
 
 Instruct the results to be limited by this number of records, from the beginning of the set,
 or the __start_row value when specified. When used with __first_row has the effect
 of querying for a window of results. The results are less than the last row number,
-and does not include the last row.
+and does not include the last row.  See __limit comment above for __first_row.
 
 =head2 __use_view
 
@@ -1064,19 +1313,13 @@ password and they are not visible in a whole bunch of scripts.
 
 =head1 VERSION
 
-Version 0.05
+Version 0.06
 
 =cut
 
 =head1 AUTHOR
 
 Greg George, C<< <gng at cpan.org> >>
-
-=head1 TODO
-
-Currently the default SOAP serialization is used rather than forcing types from the WSDL.
-This can be a problem for UTF8 (non ASCII) characters which will likely be encoded as
-'base64' rather than 'string'
 
 =head1 BUGS
 
