@@ -2,7 +2,7 @@ package ServiceNow::Simple;
 use strict;
 use warnings FATAL => 'all';
 
-our $VERSION = '0.06';
+our $VERSION = '0.07';
 
 use Data::Dumper;
 use FindBin;
@@ -37,7 +37,7 @@ BEGIN
         eval {require $cfg};
         if ($@ and $@ !~ /Can't locate /) #' <-- syntax higlighter
         {
-            print STDERR "Error in $cfg : $@";
+            carp "Error in $cfg : $@";
         }
     }
 }
@@ -438,7 +438,7 @@ sub set_soap
     my %args = ( cookie_jar => HTTP::Cookies->new(ignore_discard => 1) ) ;
     if ($self->{proxy})
     {
-        $args{https} = [ $self->{proxy} ];
+        $args{proxy} = [ https => $self->{proxy}, http => $self->{proxy} ];
     }
 
     $self->{soap} = SOAP::Lite->proxy($url, %args);
@@ -499,9 +499,9 @@ sub _print_fault
         }
         else
         {
-            print STDERR 'faultcode   =' . $result->fault->{faultcode}   . "\n";
-            print STDERR 'faultstring =' . $result->fault->{faultstring} . "\n";
-            print STDERR 'detail      =' . $result->fault->{detail}      . "\n";
+            carp 'faultcode   =' . $result->fault->{faultcode}   . "\n" .
+                 'faultstring =' . $result->fault->{faultstring} . "\n" .
+                 'detail      =' . $result->fault->{detail}      . "\n";
         }
 
         # Store the fault so it can be queried before the next ws call
@@ -568,10 +568,6 @@ sub _init
 {
     my ($self, $args) = @_;
 
-    # Stop environment variable from playing around with SOAP::Lite
-    undef($ENV{HTTP_proxy});
-    undef($ENV{HTTPS_proxy});
-
     # Did we have any of the persistant variables passed
     my $k = '5Jv@sI9^bl@D*j5H3@:7g4H[2]d%Ks314aNuGeX;';
     if ($args->{user})
@@ -589,7 +585,7 @@ sub _init
         }
         else
         {
-            print STDERR "No user defined, quitting\n";
+            carp "No user defined, quitting\n";
             exit(1);
         }
     }
@@ -609,7 +605,7 @@ sub _init
         }
         else
         {
-            print STDERR "No password defined, quitting\n";
+            carp "No password defined, quitting\n";
             exit(2);
         }
     }
@@ -623,6 +619,18 @@ sub _init
     }
     $user  = $self->{persistant}{user};
     $pword = $self->{persistant}{password};
+
+    # Stop environment variable from playing around with SOAP::Lite
+    if ($args->{__remove_env_proxy})
+    {
+        delete $ENV{HTTP_proxy}  if $ENV{HTTP_proxy};
+        delete $ENV{HTTPS_proxy} if $ENV{HTTPS_proxy};
+    }
+    elsif ($self->{persistant}{proxy} && !$ENV{HTTPS_proxy})
+    {
+        $ENV{HTTPS_proxy} = $self->{persistant}{proxy};
+    }
+
 
     # Handle the other passed arguments
     $self->{__display_value} = $args->{__display_value} ? 1 : 0;
@@ -676,14 +684,15 @@ do not need the ACL changes to allow access via these API's.
   ## All options to new
   #####################
   my $sn = ServiceNow::Simple->new({
-      instance        => 'some_name',
-      table           => 'sys_user',
-      __display_value => 1,            # Return the display value for a reference field
+      instance             => 'some_name',
+      table                => 'sys_user',
+      __display_value      => 1,            # Return the display value for a reference field
       __plus_display_value => 1,            # Return the display value for a reference field AND the sys_id
-      __limit         => 23,           # Maximum records to return
-      __log           => $log,         # Log to a File::Log object
-      __print_results => 1,            # Print
-      __soap_debug    => 1             # Print SOAP::Lite debug details
+      __limit              => 23,           # Maximum records to return
+      __log                => $log,         # Log to a File::Log object
+      __print_results      => 1,            # Print
+      __soap_debug         => 1,            # Print SOAP::Lite debug details
+      __remove_env_proxy   => 1,            # Delete any http proxy settings from environment
       });
 
 
@@ -905,6 +914,10 @@ the I<msg(level, message)> and I<exp(message)> methods.
 =item __soap_debug
 
 If true, with activate soap debug messages.  See also the I<soap_debug()> method.
+
+=item __remove_env_proxy
+
+If true, remove any HTTPS_proxy or HTTP_proxy environment variables (generally you should not need this)
 
 =back
 
@@ -1313,7 +1326,7 @@ password and they are not visible in a whole bunch of scripts.
 
 =head1 VERSION
 
-Version 0.06
+Version 0.07
 
 =cut
 
@@ -1357,6 +1370,8 @@ L<http://search.cpan.org/dist/ServiceNow::Simple/>
 
 
 =head1 ACKNOWLEDGEMENTS
+
+Jay K. Slay for assistance in debugging in a proxy environment
 
 The ServiceNow Wiki (see useful links), and authors of SOAP::Lite:
 
