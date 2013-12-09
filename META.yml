@@ -31,4 +31,4 @@ requires:
   SOAP::Lite: 1.06
   XML::Simple: 0
   perl: 5.006
-version: 0.07
+version: 0.08

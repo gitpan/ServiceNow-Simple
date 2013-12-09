@@ -2,7 +2,7 @@ package ServiceNow::Simple;
 use strict;
 use warnings FATAL => 'all';
 
-our $VERSION = '0.07';
+our $VERSION = '0.08';
 
 use Data::Dumper;
 use FindBin;
@@ -26,7 +26,7 @@ BEGIN
     my $cfg = $INC{$module};
     unless ($cfg)
     {
-        die "Wrong case in use statement or $module module renamed. Perl is case sensitive!!!\n";
+        croak "Wrong case in use statement or $module module renamed. Perl is case sensitive!!!\n";
     }
     my $compiled = !(-e $cfg); # if the module was not read from disk => the script has been "compiled"
     $cfg =~ s/\.pm$/.cfg/;
@@ -37,7 +37,7 @@ BEGIN
         eval {require $cfg};
         if ($@ and $@ !~ /Can't locate /) #' <-- syntax higlighter
         {
-            carp "Error in $cfg : $@";
+            carp "Error in $cfg : $@\n";
         }
     }
 }
@@ -147,7 +147,12 @@ sub get_records
         $the_columns = $args_h->{__columns};
         delete $args_h->{__columns};
 
-        if ($self->{__columns}{$self->{instance}}{$self->{table}}{$the_columns})
+        if ($self->{instance_url} && $self->{__columns}{$self->{instance_url}}{$self->{table}}{$the_columns})
+        {
+            # We already have a list of fields to exclude for this form and __columns list
+            $args_h->{__exclude_columns} = $self->{__columns}{$self->{instance_url}}{$self->{table}}{$the_columns};
+        }
+        elsif ($self->{instance} && $self->{__columns}{$self->{instance}}{$self->{table}}{$the_columns})
         {
             # We already have a list of fields to exclude for this form and __columns list
             $args_h->{__exclude_columns} = $self->{__columns}{$self->{instance}}{$self->{table}}{$the_columns};
@@ -157,7 +162,12 @@ sub get_records
             # Do we have the list of fields for this form
             my @to_include = split /,/, $the_columns;
             my %all_fields;
-            if ($self->{__columns}{__list}{$self->{instance}}{$self->{table}})
+            if ($self->{instance_url} && $self->{__columns}{__list}{$self->{instance_url}}{$self->{table}})
+            {
+                my $list = $self->{__columns}{__list}{$self->{instance_url}}{$self->{table}};
+                %all_fields = map { $_ => 1 } split /,/, $list;
+            }
+            elsif ($self->{instance} && $self->{__columns}{__list}{$self->{instance}}{$self->{table}})
             {
                 my $list = $self->{__columns}{__list}{$self->{instance}}{$self->{table}};
                 %all_fields = map { $_ => 1 } split /,/, $list;
@@ -188,7 +198,14 @@ sub get_records
                 %all_fields = map { $_ => 1 } keys %{$r->body->{getRecordsResponse}{getRecordsResult}};
 
                 # Store the full list in case we need it later
-                $self->{__columns}{__list}{$self->{instance}}{$self->{table}} = join(',', keys %all_fields);
+                if ($self->{instance_url})
+                {
+                    $self->{__columns}{__list}{$self->{instance_url}}{$self->{table}} = join(',', keys %all_fields);
+                }
+                else
+                {
+                    $self->{__columns}{__list}{$self->{instance}}{$self->{table}} = join(',', keys %all_fields);
+                }
             }
             my @to_exclude;
             # Remove from the all fields hash those fields we want in the results
@@ -202,7 +219,14 @@ sub get_records
             $args_h->{__exclude_columns} = join(',', sort keys %all_fields);
 
             # Store for later use
-            $self->{__columns}{$self->{instance}}{$self->{table}}{$the_columns} = $args_h->{__exclude_columns};
+            if ($self->{instance_url})
+            {
+                $self->{__columns}{$self->{instance_url}}{$self->{table}}{$the_columns} = $args_h->{__exclude_columns};
+            }
+            else
+            {
+                $self->{__columns}{$self->{instance}}{$self->{table}}{$the_columns} = $args_h->{__exclude_columns};
+            }
         }
     }
 
@@ -293,8 +317,8 @@ sub get_records
     }
     else
     {
-    my @params = $self->_load_args($args_h);
-    my $result = $self->{soap}->call($method => @params);
+        my @params = $self->_load_args($args_h);
+        my $result = $self->{soap}->call($method => @params);
         my ($data_hr, $count) = $self->_getRecordsResponse($result);
 
         return $data_hr;
@@ -403,10 +427,11 @@ sub set_table
     my ($self, $table) = @_;
 
     $self->{table} = $table;
-    $self->set_soap() if ($self->{instance});
-    $self->_load_wsdl($table) unless $self->{wsdl}{$self->{instance}}{$table};
-    # GG
-    #print Dumper($self->{wsdl}{$self->{instance}}{$table}), "\n";
+    $self->set_soap() if ($self->{instance} || $self->{instance_url});
+    if(!$self->{wsdl} || ($self->{wsdl}{$self->{instance}} && !$self->{wsdl}{$self->{instance}}{$table}) || ($self->{wsdl}{$self->{instance_url}} && !$self->{wsdl}{$self->{instance_url}}{$table}))
+    {
+        $self->_load_wsdl($table);
+    }
 }
 
 
@@ -414,7 +439,26 @@ sub set_instance
 {
     my ($self, $instance) = @_;
 
+    if ($self->{instance_url})
+    {
+        carp "instance_url is defined and will take precedence over a defined 'instance'\n";
+    }
+
     $self->{instance} = $instance;
+    $self->set_soap() if ($self->{table});
+}
+
+
+sub set_instance_url
+{
+    my ($self, $instance_url) = @_;
+
+    if ($self->{instance})
+    {
+        carp "instance is defined, instance_url will take precedence over a defined 'instance'\n";
+    }
+
+    $self->{instance_url} = $instance_url;
     $self->set_soap() if ($self->{table});
 }
 
@@ -423,7 +467,19 @@ sub set_soap
 {
     my $self = shift;
 
-    my $url = 'https://' . $self->{instance} . '.service-now.com/' . $self->{table} . '.do?SOAP';
+    my $url;
+    if ($self->{instance_url})
+    {
+        if ($self->{instance_url} !~ m{/$})
+        {
+            $self->{instance_url} .= '/';
+        }
+        $url = $self->{instance_url} . $self->{table} . '.do?SOAP';
+    }
+    else
+    {
+        $url = 'https://' . $self->{instance} . '.service-now.com/' . $self->{table} . '.do?SOAP';
+    }
 
     # Do we need to show the display value for a reference field rather than the sys_id, or both
     if ($self->{__display_value} && !$self->{__plus_display_value})
@@ -460,7 +516,16 @@ sub _load_args
     my ($self, $args_h) = @_;
     my (@args, $k, $v);
 
-    my $fld_details = $self->{wsdl}{$self->{instance}}{$self->{table}}{$self->{method}};
+    my $fld_details;
+    if ($self->{instance_url})
+    {
+        $fld_details = $self->{wsdl}{$self->{instance_url}}{$self->{table}}{$self->{method}};
+    }
+    else
+    {
+        $fld_details = $self->{wsdl}{$self->{instance}}{$self->{table}}{$self->{method}};
+    }
+
     while (($k, $v) = each %$args_h)
     {
         if ($fld_details->{$k})
@@ -518,12 +583,39 @@ sub _load_wsdl
     my ($self, $table) = @_;
 
     my $ua = LWP::UserAgent->new();
-    $ua->credentials($self->{instance} . '.service-now.com:443', 'Service-now', $user, $pword);
+
+    if ($self->{instance_url})
+    {
+        # Not sure if this is correct for instance_url case, since I have not been able to test it?
+        # expect instance_url format to be https://instance_url/
+        if ($self->{instance_url} =~ m{https?://([^/]+)/?$})
+        {
+            $ua->credentials($1 . ':443', 'Service-now', $user, $pword);
+        }
+        else
+        {
+            # Not in the format we expected...
+            carp '_load_wsdl instance_url format expected as https://instance_url/ but was ' . $self->{instance_url} . ", skipping WDSL load.\n";
+            return;
+        }
+    }
+    else
+    {
+        $ua->credentials($self->{instance} . '.service-now.com:443', 'Service-now', $user, $pword);
+    }
 
     # Note:  There is no advantage in including the displayvalue=1 or displayvalue=all in the WSDL request
     #        in the case of displayvalue=all, the dv_ fields can not be excluded for fields you do request
     #        (or more accurately, fields you don't exclude)
-    my $response = $ua->get('https://' . $self->{instance} . '.service-now.com/' . $table . '.do?WSDL');
+    my $response;
+    if ($self->{instance_url})
+    {
+        $response = $ua->get($self->{instance_url} . $table . '.do?WSDL');
+    }
+    else
+    {
+        $response = $ua->get('https://' . $self->{instance} . '.service-now.com/' . $table . '.do?WSDL');
+    }
     if ($response->is_success())
     {
         #my $wsdl = XMLin($response->content, ForceArray => 1);
@@ -538,7 +630,14 @@ sub _load_wsdl
             {
                 #print "\n\n", join("\n", keys %{ $wsdl->{'wsdl:types'}{'xsd:schema'}{'xsd:element'}{deleteMultiple}{'xsd:complexType'}{'xsd:sequence'}{'xsd:element'} }), "\n";
                 #print "  $fld => $e->{$fld}{type}\n";
-                $self->{wsdl}{$self->{instance}}{$table}{$method}{$fld} = $e->{$fld};
+                if ($self->{instance_url})
+                {
+                    $self->{wsdl}{$self->{instance_url}}{$table}{$method}{$fld} = $e->{$fld};
+                }
+                else
+                {
+                    $self->{wsdl}{$self->{instance}}{$table}{$method}{$fld} = $e->{$fld};
+                }
             }
         }
     }
@@ -636,12 +735,13 @@ sub _init
     $self->{__display_value} = $args->{__display_value} ? 1 : 0;
     $self->{__plus_display_value} = $args->{__plus_display_value} ? 1 : 0;
     $self->set_instance($args->{instance})              if $args->{instance};
+    $self->set_instance_url($args->{instance_url})      if $args->{instance_url};
     $self->set_table($args->{table})                    if $args->{table};     # Important this is after instance
     $self->{__limit}         = $args->{__limit}         if $args->{__limit};
     $self->{__log}           = $args->{__log}           if $args->{__log};
     $self->{__print_results} = $args->{__print_results} if $args->{__print_results};   # Print results to stdout
     $self->soap_debug()                                 if $args->{__soap_debug};
-    if ($args->{table} && $args->{instance})
+    if ($args->{table} && ($args->{instance} || $args->{instance_url}))
     {
         $self->set_soap();
     }
@@ -685,6 +785,7 @@ do not need the ACL changes to allow access via these API's.
   #####################
   my $sn = ServiceNow::Simple->new({
       instance             => 'some_name',
+      instance_url         => 'http://some_name.something/',   # Not instance_url takes precedence over 'instance'
       table                => 'sys_user',
       __display_value      => 1,            # Return the display value for a reference field
       __plus_display_value => 1,            # Return the display value for a reference field AND the sys_id
@@ -858,7 +959,16 @@ The parameters that can be passed are:
 
 =item instance
 
-REQUIRED. The ServiceNow instance that ServiceNow::Simple should connect to.
+REQUIRED unless instance_url is defined. The ServiceNow instance that ServiceNow::Simple should connect to.
+This is the normal approach and I<instance_url> is only provided for special cases where the normal URL
+is not:
+
+ instance.service-now.com
+
+=item instance_url
+
+Alternative to defining I<instance>.  B<Note:> it is intended that this only be used where I<instance> can
+not be used.  This was added in version 0.08 after a suggestion from John Andersen.
 
 =item table
 
@@ -1181,6 +1291,21 @@ Will also log to the log file if __log object is defined.
 =head2 set_instance
 
 Allows the instance to be changed from what was defined in the call to new.
+B<Note:> This assumes the format of the URL is:
+
+ instance.service-now.com
+
+if this is not the case (it normally is) you should be using I<instance_url> instead.
+
+=head2 set_instance_url
+
+Allows the instance URL to be changed from what was defined in the call to new.
+B<Note:> This assumes the format of the URL is:
+
+ https://something/
+
+B<You would normally use 'instance' rather than 'instance_url'>.
+I<instance_url> takes precedence over I<instance>.
 
 =head2 set_table
 
@@ -1326,7 +1451,7 @@ password and they are not visible in a whole bunch of scripts.
 
 =head1 VERSION
 
-Version 0.07
+Version 0.08
 
 =cut
 
@@ -1380,6 +1505,9 @@ The ServiceNow Wiki (see useful links), and authors of SOAP::Lite:
  Byrne Reese    (byrne@majordojo.com)
  Martin Kutter  (martin.kutter@fen-net.de)
  Fred Moyer     (fred@redhotpenguin.com)
+
+John Andersen for suggesting instance_url
+ see http://community.servicenow.com/forum/20300#comment-44864
 
 =head1 LICENSE AND COPYRIGHT
 

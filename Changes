@@ -1,5 +1,11 @@
 Revision history for ServiceNow-Simple
 
+0.08 2013-12-09
+ - Added instance_url as argument to new() and new method set_instance_url
+   to allow for those cases where the standard instance.service-now.com does not apply.  
+   Suggestion by John Andersen
+   http://community.servicenow.com/forum/20300#comment-44864
+   
 0.07 2013-11-20
  - Update to handling of proxy following RT#90358 and assistance from Jay K. Slay
  - New flag remove_env_proxy
