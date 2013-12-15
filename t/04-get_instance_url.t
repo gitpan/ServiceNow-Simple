@@ -19,7 +19,7 @@ sub BEGIN
     }
 }
 
-my $url = 'https://' . CCACHE::instance() . 'service-now.com/';
+my $url = 'https://' . CCACHE::instance() . '.service-now.com/';
 my $sn = ServiceNow::Simple->new({
         instance_url => $url,
         user         => CCACHE::user(),

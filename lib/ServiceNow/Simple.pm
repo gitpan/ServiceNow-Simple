@@ -2,7 +2,7 @@ package ServiceNow::Simple;
 use strict;
 use warnings FATAL => 'all';
 
-our $VERSION = '0.08';
+our $VERSION = '0.09';
 
 use Data::Dumper;
 use FindBin;
@@ -1451,7 +1451,7 @@ password and they are not visible in a whole bunch of scripts.
 
 =head1 VERSION
 
-Version 0.08
+Version 0.09
 
 =cut
 

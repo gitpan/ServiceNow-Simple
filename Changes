@@ -1,5 +1,7 @@
 Revision history for ServiceNow-Simple
-
+0.09 2013-12-16
+ - Correction to test 04-get_instance_url.t
+ 
 0.08 2013-12-09
  - Added instance_url as argument to new() and new method set_instance_url
    to allow for those cases where the standard instance.service-now.com does not apply.  
